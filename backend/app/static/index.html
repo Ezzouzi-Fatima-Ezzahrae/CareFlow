@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CareFlow — AI Medical Timeline</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .pulse-dot { animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
+  .timeline-line { background: linear-gradient(to bottom, #14b8a6, #0f766e); }
+  .markdown h1, .markdown h2 { font-weight: 700; margin-top: .8rem; margin-bottom: .4rem; }
+  .markdown h2 { font-size: 1rem; color: #0f766e; }
+  .markdown ul { list-style: disc; padding-left: 1.2rem; }
+  .markdown strong { color: #0f172a; font-weight: 600; }
+  .markdown p { margin: .4rem 0; line-height: 1.5; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="bg-white border-b border-slate-200">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <!-- Drop your logo at backend/app/static/logo.png. Falls back to a teal "C" badge if missing. -->
+      <img src="/static/logo.png" alt="CareFlow logo"
+           class="w-9 h-9 rounded-lg object-contain"
+           onerror="this.outerHTML='&lt;div class=&quot;w-9 h-9 rounded-lg bg-teal-600 flex items-center justify-center text-white font-bold&quot;&gt;C&lt;/div&gt;'">
+      <div>
+        <div class="font-bold text-lg leading-tight">CareFlow</div>
+        <div class="text-xs text-slate-500">AI medical timeline & risk detection</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-4 text-sm">
+      <span id="health" class="flex items-center gap-2 text-slate-500">
+        <span class="w-2 h-2 rounded-full bg-slate-300 pulse-dot"></span> connecting…
+      </span>
+      <a href="/docs" class="text-teal-700 hover:underline">API docs</a>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6">
+
+  <!-- Left: patient list -->
+  <aside class="col-span-3">
+    <div class="bg-white rounded-xl border border-slate-200 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">Patients</h2>
+        <button id="newPatientBtn" class="text-xs bg-teal-600 text-white px-2 py-1 rounded hover:bg-teal-700">+ New</button>
+      </div>
+      <ul id="patients" class="space-y-1 text-sm"></ul>
+    </div>
+  </aside>
+
+  <!-- Right: detail -->
+  <section class="col-span-9 space-y-6">
+
+    <!-- Patient header -->
+    <div id="patientHeader" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="text-xs text-teal-700 uppercase tracking-wide">Active patient</div>
+          <h1 id="patientName" class="text-2xl font-bold mt-1"></h1>
+          <div id="patientMeta" class="text-sm text-slate-500 mt-1"></div>
+        </div>
+        <div id="riskBadge" class="hidden px-3 py-1.5 rounded-full text-sm font-medium"></div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center text-slate-500">
+      <div class="text-4xl mb-2">←</div>
+      <div>Pick a patient on the left or create a new one to begin.</div>
+    </div>
+
+    <!-- Upload + Actions -->
+    <div id="actions" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+      <h2 class="font-semibold mb-3">Add a record</h2>
+      <form id="uploadForm" class="flex flex-wrap items-end gap-3">
+        <div>
+          <label class="text-xs text-slate-500 block mb-1">File (PDF, image, or .txt)</label>
+          <input id="file" type="file" required
+                 class="text-sm file:mr-2 file:px-3 file:py-1.5 file:rounded file:border-0 file:bg-teal-50 file:text-teal-800" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 block mb-1">Recorded at (optional)</label>
+          <input id="recordedAt" type="date" class="border border-slate-300 rounded px-2 py-1.5 text-sm" />
+        </div>
+        <button class="bg-teal-600 hover:bg-teal-700 text-white text-sm px-4 py-2 rounded">Upload & analyze</button>
+        <span id="uploadStatus" class="text-sm text-slate-500"></span>
+      </form>
+      <div class="mt-4 flex gap-2">
+        <button id="summaryBtn" class="bg-slate-900 hover:bg-slate-800 text-white text-sm px-4 py-2 rounded">Generate doctor summary</button>
+        <button id="refreshBtn" class="bg-white border border-slate-300 hover:bg-slate-50 text-sm px-4 py-2 rounded">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Risk + Summary card -->
+    <div id="summaryCard" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">Doctor summary</h2>
+        <span id="summaryMeta" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="summaryContent" class="markdown text-sm text-slate-700"></div>
+    </div>
+
+    <!-- Changes -->
+    <div id="changesCard" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+      <h2 class="font-semibold mb-3">Detected changes</h2>
+      <ul id="changesList" class="space-y-2 text-sm"></ul>
+    </div>
+
+    <!-- Timeline -->
+    <div id="timelineCard" class="hidden bg-white rounded-xl border border-slate-200 p-5">
+      <h2 class="font-semibold mb-3">Medical timeline</h2>
+      <ol id="timeline" class="relative border-l-2 border-teal-200 pl-5 space-y-4"></ol>
+    </div>
+
+  </section>
+</main>
+
+<!-- New patient modal -->
+<div id="modal" class="hidden fixed inset-0 bg-slate-900/40 flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl p-6 w-full max-w-md">
+    <h3 class="font-semibold mb-3">New patient</h3>
+    <form id="newPatientForm" class="space-y-3">
+      <input id="np_name" required placeholder="Full name" class="w-full border border-slate-300 rounded px-3 py-2 text-sm" />
+      <div class="flex gap-2">
+        <input id="np_dob" type="date" class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm" />
+        <select id="np_gender" class="border border-slate-300 rounded px-3 py-2 text-sm">
+          <option value="">Gender</option>
+          <option>F</option><option>M</option><option>Other</option>
+        </select>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" id="cancelNew" class="px-3 py-1.5 text-sm">Cancel</button>
+        <button class="bg-teal-600 hover:bg-teal-700 text-white px-4 py-1.5 rounded text-sm">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API = "";   // same origin
+let activePatientId = null;
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, opts);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function checkHealth() {
+  try {
+    await api("/health");
+    $("health").innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> API online';
+  } catch {
+    $("health").innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500"></span> API offline';
+  }
+}
+
+async function loadPatients() {
+  const list = await api("/patients");
+  const ul = $("patients");
+  ul.innerHTML = "";
+  if (!list.length) {
+    ul.innerHTML = '<li class="text-xs text-slate-400">No patients yet.</li>';
+    return;
+  }
+  list.forEach(p => {
+    const li = document.createElement("li");
+    li.className = `cursor-pointer px-3 py-2 rounded hover:bg-slate-100 ${activePatientId === p.id ? "bg-teal-50 text-teal-800 font-medium" : ""}`;
+    li.innerHTML = `<div class="font-medium">${escapeHtml(p.name)}</div>
+                    <div class="text-xs text-slate-500">${p.gender || ""} ${p.dob ? "· " + p.dob : ""}</div>`;
+    li.onclick = () => selectPatient(p.id);
+    ul.appendChild(li);
+  });
+}
+
+async function selectPatient(id) {
+  activePatientId = id;
+  await loadPatients();
+  $("emptyState").classList.add("hidden");
+  $("patientHeader").classList.remove("hidden");
+  $("actions").classList.remove("hidden");
+  const p = await api(`/patients/${id}`);
+  $("patientName").textContent = p.name;
+  $("patientMeta").textContent = [p.gender, p.dob, `ID #${p.id}`].filter(Boolean).join(" · ");
+
+  await Promise.all([loadTimeline(id), loadChanges(id)]);
+  $("summaryCard").classList.add("hidden");
+}
+
+async function loadTimeline(id) {
+  const items = await api(`/patients/${id}/timeline`);
+  const ol = $("timeline");
+  ol.innerHTML = "";
+  if (!items.length) {
+    ol.innerHTML = '<li class="text-sm text-slate-400">No events yet — upload a record to begin.</li>';
+  } else {
+    items.forEach(e => {
+      const li = document.createElement("li");
+      li.className = "relative";
+      const sev = e.severity || "info";
+      const dot = sev === "critical" ? "bg-red-500" : sev === "warn" ? "bg-amber-500" : "bg-teal-500";
+      li.innerHTML = `
+        <span class="absolute -left-[1.6rem] top-1.5 w-3 h-3 rounded-full ${dot} ring-2 ring-white"></span>
+        <div class="text-xs text-slate-500">${e.timestamp ? new Date(e.timestamp).toLocaleDateString() : "Unknown date"}</div>
+        <div class="text-sm">
+          <span class="font-medium">${escapeHtml(e.event_type)}</span>
+          ${e.code ? `<span class="text-slate-500"> · ${escapeHtml(e.code)}</span>` : ""}
+          ${e.value_num != null ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">${e.value_num} ${e.unit || ""}</span>` : ""}
+        </div>
+        ${e.value_text ? `<div class="text-sm text-slate-600">${escapeHtml(e.value_text)}</div>` : ""}
+      `;
+      ol.appendChild(li);
+    });
+  }
+  $("timelineCard").classList.remove("hidden");
+}
+
+async function loadChanges(id) {
+  const changes = await api(`/patients/${id}/changes`);
+  const list = $("changesList");
+  const card = $("changesCard");
+  list.innerHTML = "";
+  let topRisk = "low";
+  if (!changes.length) {
+    card.classList.add("hidden");
+  } else {
+    card.classList.remove("hidden");
+    changes.forEach(c => {
+      if (c.risk_level === "high") topRisk = "high";
+      else if (c.risk_level === "moderate" && topRisk !== "high") topRisk = "moderate";
+      const color = c.risk_level === "high" ? "bg-red-50 border-red-200 text-red-900"
+                  : c.risk_level === "moderate" ? "bg-amber-50 border-amber-200 text-amber-900"
+                  : "bg-slate-50 border-slate-200";
+      const li = document.createElement("li");
+      li.className = `border ${color} rounded p-3`;
+      const deltas = safeJson(c.delta_json) || [];
+      li.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs uppercase tracking-wide">${c.risk_level} risk</span>
+          <span class="text-xs text-slate-500">${new Date(c.created_at).toLocaleString()}</span>
+        </div>
+        ${c.notes ? `<div class="text-sm">${escapeHtml(c.notes)}</div>` : ""}
+        ${deltas.length ? `<ul class="text-xs mt-2 space-y-0.5">
+          ${deltas.filter(d => d.type === "numeric").slice(0,5).map(d =>
+            `<li>• <strong>${escapeHtml(d.code)}</strong>: ${d.from} → ${d.to} ${d.unit || ""} (Δ ${d.delta})</li>`
+          ).join("")}
+        </ul>` : ""}
+      `;
+      list.appendChild(li);
+    });
+  }
+
+  // Risk badge
+  const badge = $("riskBadge");
+  if (changes.length) {
+    badge.classList.remove("hidden");
+    badge.textContent = topRisk + " risk";
+    badge.className = "px-3 py-1.5 rounded-full text-sm font-medium " + (
+      topRisk === "high" ? "bg-red-100 text-red-800"
+      : topRisk === "moderate" ? "bg-amber-100 text-amber-800"
+      : "bg-emerald-100 text-emerald-800"
+    );
+  } else {
+    badge.classList.add("hidden");
+  }
+}
+
+function safeJson(s) { try { return JSON.parse(s || "[]"); } catch { return []; } }
+function escapeHtml(s) { return (s ?? "").toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Tiny markdown renderer (headers, bold, bullets, paragraphs)
+function md(s) {
+  if (!s) return "";
+  s = escapeHtml(s);
+  s = s.replace(/^### (.*)$/gm, "<h3>$1</h3>")
+       .replace(/^## (.*)$/gm, "<h2>$1</h2>")
+       .replace(/^# (.*)$/gm, "<h1>$1</h1>")
+       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+       .replace(/^- (.+)$/gm, "<li>$1</li>");
+  s = s.replace(/(<li>.*<\/li>\n?)+/g, m => "<ul>" + m + "</ul>");
+  s = s.split(/\n{2,}/).map(b => /<(h\d|ul|li)/.test(b) ? b : "<p>" + b.replace(/\n/g, "<br>") + "</p>").join("");
+  return s;
+}
+
+// Upload
+$("uploadForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!activePatientId) return;
+  const file = $("file").files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("file", file);
+  if ($("recordedAt").value) fd.append("recorded_at", $("recordedAt").value + "T00:00:00");
+  $("uploadStatus").textContent = "Analyzing… (this can take 5–20s)";
+  try {
+    const r = await fetch(`${API}/patients/${activePatientId}/records`, { method: "POST", body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    $("uploadStatus").textContent = "Done.";
+    $("file").value = "";
+    await Promise.all([loadTimeline(activePatientId), loadChanges(activePatientId)]);
+  } catch (err) {
+    $("uploadStatus").textContent = "Failed: " + err.message;
+  }
+});
+
+// Summary
+$("summaryBtn").addEventListener("click", async () => {
+  if (!activePatientId) return;
+  $("summaryBtn").disabled = true;
+  $("summaryBtn").textContent = "Generating…";
+  try {
+    const s = await api(`/patients/${activePatientId}/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ window_days: 365 })
+    });
+    $("summaryCard").classList.remove("hidden");
+    $("summaryContent").innerHTML = md(s.content_md);
+    $("summaryMeta").textContent = `Generated ${new Date(s.created_at).toLocaleString()}` + (s.model ? ` · ${s.model}` : "");
+  } catch (err) {
+    alert("Summary failed: " + err.message);
+  } finally {
+    $("summaryBtn").disabled = false;
+    $("summaryBtn").textContent = "Generate doctor summary";
+  }
+});
+
+$("refreshBtn").addEventListener("click", () => activePatientId && selectPatient(activePatientId));
+
+// New patient modal
+$("newPatientBtn").addEventListener("click", () => $("modal").classList.remove("hidden"));
+$("cancelNew").addEventListener("click", () => $("modal").classList.add("hidden"));
+$("newPatientForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    name: $("np_name").value,
+    dob: $("np_dob").value || null,
+    gender: $("np_gender").value || null,
+  };
+  const p = await api("/patients", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  $("modal").classList.add("hidden");
+  $("np_name").value = ""; $("np_dob").value = ""; $("np_gender").value = "";
+  await loadPatients();
+  selectPatient(p.id);
+});
+
+// Init
+checkHealth();
+loadPatients();
+</script>
+</body>
+</html>

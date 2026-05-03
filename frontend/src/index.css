@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { font-family: "Inter", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+
+.markdown h1, .markdown h2, .markdown h3 { font-weight: 700; margin-top: 1rem; margin-bottom: 0.4rem; color: #0F172A; }
+.markdown h2 { font-size: 1rem; color: #0F766E; }
+.markdown h3 { font-size: 0.95rem; color: #334155; }
+.markdown ul { list-style: disc; padding-left: 1.2rem; }
+.markdown li { margin: 0.15rem 0; }
+.markdown strong { color: #0F172A; font-weight: 600; }
+.markdown p { margin: 0.4rem 0; line-height: 1.55; }
+.markdown em { color: #64748B; font-style: italic; }

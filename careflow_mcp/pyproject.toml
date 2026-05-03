@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "careflow-mcp"
+version = "0.1.0"
+description = "CareFlow — Healthcare timeline & risk-detection tools as an MCP server."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "CareFlow Team" }]
+license = { text = "MIT" }
+keywords = ["mcp", "healthcare", "ai", "agents", "timeline", "fhir"]
+dependencies = [
+    "mcp[cli]>=1.2.0",
+    "pydantic>=2.9.0",
+    "pdfplumber>=0.11.4",
+    "PyMuPDF>=1.24.14",
+    "pytesseract>=0.3.13",
+    "Pillow>=11.0.0",
+    "matplotlib>=3.9.0",
+]
+
+[project.scripts]
+careflow-mcp = "careflow_mcp.server:main"
+careflow-mcp-http = "careflow_mcp.server:main_http"
+careflow-mcp-sse = "careflow_mcp.server:main_sse"
