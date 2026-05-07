@@ -47,3 +47,13 @@ logs/
 *.egg-info/
 dist/
 build/
+# Documentation / presentation files
+
+CareFlow_Pitch.pptx
+DEMO_VIDEO.md
+GITHUB.md
+PUBLISH_TO_PROMPT_OPINION.md
+SETUP_WINDOWS.md
+
+# Optional local test folder
+test_files/
