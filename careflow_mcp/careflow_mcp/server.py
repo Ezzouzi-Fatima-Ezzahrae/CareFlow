@@ -30,6 +30,18 @@ from starlette.responses import JSONResponse, Response
 
 from . import __version__
 
+# FastMCP enables DNS-rebinding protection by default which rejects any
+# Host header that isn't localhost — that's why /sse returns "Invalid Host
+# header" when reached through Fly.io / cloudflared / ngrok. Disable it so
+# the SSE transport accepts any public hostname.
+try:
+    from mcp.server.transport_security import TransportSecuritySettings
+except ImportError:
+    try:
+        from mcp.shared.transport_security import TransportSecuritySettings
+    except ImportError:
+        TransportSecuritySettings = None  # older mcp SDK; nothing to do
+
 
 # ===========================================================================
 # In-memory patient cache — bridges PO's selected patient to the standalone
@@ -259,7 +271,7 @@ def fetch_fhir_patient_bundle(patient_id: str) -> dict | None:
         return None
 
 
-mcp = FastMCP(
+_fastmcp_kwargs: dict = dict(
     name="CareFlow",
     instructions=(
         "CareFlow exposes deterministic healthcare tools for ingesting patient "
@@ -269,6 +281,18 @@ mcp = FastMCP(
         "without needing your own extractor model."
     ),
 )
+
+# Disable DNS-rebinding host validation so the SSE transport accepts requests
+# proxied through Fly.io, cloudflared, ngrok, etc. (Has no security impact for
+# our use case — this is a deterministic, public, read-mostly service.)
+if TransportSecuritySettings is not None:
+    _fastmcp_kwargs["transport_security"] = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+        allowed_hosts=["*"],
+        allowed_origins=["*"],
+    )
+
+mcp = FastMCP(**_fastmcp_kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -693,37 +717,24 @@ def register_patient(
     summary_text: str = "",
     patient_json: str = "",
     patient_id: str = "",
-) -> dict[str, Any]:
-    """All-in-one tool — registers the patient in CareFlow's dashboard cache,
-    extracts structured clinical events from a brief summary, generates a
-    doctor brief, and returns it ALL in a single fast call.
+) -> str:
+    """ALL-IN-ONE — registers the patient in CareFlow's dashboard cache,
+    extracts events, generates the doctor brief, AND returns one ready-to-paste
+    Markdown string that already contains the brief + the clickable dashboard
+    link + the disclaimer.
 
-    CALL THIS FIRST AND ONLY when the user has a patient selected in
-    Prompt Opinion. After this returns, just present the doctor brief to the
-    user — no other tool calls needed.
+    Call this ONCE. Then paste the return value VERBATIM as your reply.
 
-    IMPORTANT for speed: prefer `summary_text` over `patient_json`. A 200-500
-    character clinical summary is fast; a full FHIR Bundle JSON is slow because
-    of token transfer cost. PO often gives you the patient summary in your
-    context — pass that string verbatim as `summary_text`.
+    Speed tip: prefer `summary_text` over `patient_json`. A short 200–500 char
+    summary is fast; a full FHIR JSON is slow.
 
     Args:
         name: Patient's full name (required).
-        summary_text: Concise clinical summary as plain text. Include vitals,
-            labs, diagnoses, and medications you can see. CareFlow will regex-
-            extract structured events from this.
-        patient_json: Optional — full FHIR Bundle JSON if you have it cheaply.
-            Use only when summary_text isn't enough.
+        summary_text: Plain-text clinical summary (vitals, labs, diagnoses, meds).
+        patient_json: Optional full FHIR Bundle JSON.
         patient_id: Optional ID; auto-generated if omitted.
 
-    Returns:
-        {
-          "patient_id": str,
-          "name": str,
-          "event_count": int,
-          "summary_markdown": str,    ← present this to the user
-          "dashboard_url": "http://localhost:5173"
-        }
+    Returns: A single Markdown string. Paste it as your reply with no edits.
     """
     data: dict | None = None
     if patient_json:
@@ -764,22 +775,22 @@ def register_patient(
     # it uses its own /api/* proxy (no need for ?mcp=). For local dev or
     # other hosts, include the mcp= param so the dashboard knows where to
     # fetch from.
-    dashboard_base = os.environ.get("CAREFLOW_DASHBOARD_URL", "http://localhost:5173").rstrip("/")
-    public_mcp = (os.environ.get("CAREFLOW_PUBLIC_MCP_URL") or "http://localhost:8000").rstrip("/")
+    dashboard_base = os.environ.get( "http://localhost:5173").rstrip("/")
+    public_mcp = os.environ.get ("http://localhost:8000").rstrip("/")
     params: dict = {"patient": final_id}
     if ".vercel.app" not in dashboard_base:
         params["mcp"] = public_mcp
     dashboard_url = f"{dashboard_base}?{urllib.parse.urlencode(params)}"
 
-    return {
-        "patient_id": record["id"],
-        "name": final_name,
-        "event_count": len(derived_events),
-        "summary_markdown": summary_md,
-        "dashboard_url": dashboard_url,
-        "dashboard_link_markdown": f"[Open {final_name}'s dashboard]({dashboard_url})",
-        "total_cached_patients": len(_PATIENT_CACHE),
-    }
+    # Compose ONE single Markdown string the agent just pastes verbatim.
+    response = (
+        f"{summary_md.rstrip()}"
+        f"\n\n"
+        f"**[📊 Open {final_name}'s dashboard]({dashboard_url})**"
+        f"\n\n"
+        f"_Synthetic data only. Not a medical device._"
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -920,20 +931,32 @@ def main() -> None:
     mcp.run()
 
 
+def _resolve_host_port():
+    """Return (host, port) — defaults are local dev; cloud overrides via env."""
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
+    return host, port
+
+
+_UVICORN_KW = {
+    # Trust the X-Forwarded-* headers Fly.io / Render / any reverse proxy adds.
+    # Without these, uvicorn returns 421 "Invalid Host header" for proxied
+    # requests (PO → Fly edge → our app).
+    "forwarded_allow_ips": "*",
+    "proxy_headers": True,
+    "log_level": "info",
+}
+
+
 def main_http() -> None:
-    """Streamable HTTP transport with CORS so the dashboard can poll."""
-    import uvicorn
-    uvicorn.run(_with_cors(mcp.streamable_http_app()),
-                host="127.0.0.1", port=8000, log_level="info")
+    """Streamable HTTP transport."""
+    mcp.run(transport="streamable-http")
 
 
 def main_sse() -> None:
-    """SSE transport (used by Prompt Opinion) with CORS for the dashboard."""
-    import uvicorn
-    uvicorn.run(_with_cors(mcp.sse_app()),
-                host="127.0.0.1", port=8000, log_level="info",
-                forwarded_allow_ips="*",
-                proxy_headers=True)
+    """SSE transport. Used by Prompt Opinion."""
+    mcp.run(transport="sse")
+
 
 if __name__ == "__main__":
     import sys
